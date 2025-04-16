@@ -21,6 +21,16 @@ logger = logging.getLogger(__name__)
 # Состояния для диалога
 WAITING_FOR_DATA = 1
 
+async def post_init(application: Application):
+    """Проверка подключения с увеличенным таймаутом"""
+    try:
+        async with anyio.fail_after(30):  # Таймаут 30 секунд
+            await application.bot.get_me()
+            logger.info("Успешное подключение к Telegram API")
+    except Exception as e:
+        logger.error(f"FATAL: Ошибка подключения: {e}")
+        sys.exit(1)
+
 def parse_time(ts):
     """Универсальный парсер для русскоязычных дат"""
     # Нормализация строки
@@ -185,26 +195,47 @@ async def process_data(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 def main():
     """Запуск бота"""
-    token = os.getenv("BOT_TOKEN")
-    if not token:
-        raise ValueError("Не задан BOT_TOKEN в переменных окружения")
-    
-    application = Application.builder().token(token).build()
-    
-    conv_handler = ConversationHandler(
-        entry_points=[CommandHandler("start", start)],
-        states={
-            WAITING_FOR_DATA: [
-                CommandHandler("done", process_data),
-                CommandHandler("cancel", cancel),
-                MessageHandler(filters.TEXT & ~filters.COMMAND, collect_data),
-            ],
-        },
-        fallbacks=[CommandHandler("cancel", cancel)],
-    )
-    
-    application.add_handler(conv_handler)
-    application.run_polling()
+    try:
+        token = os.getenv("BOT_TOKEN")
+        if not token:
+            raise ValueError("Не задан BOT_TOKEN в переменных окружения")
+        
+        # Конфигурация с увеличенными таймаутами
+        request = HTTPXRequest(connect_timeout=30, read_timeout=30)
+        
+        application = (
+            Application.builder()
+            .token(token)
+            .request(request)
+            .post_init(post_init)
+            .build()
+        )
+
+        # Настройка обработчиков
+        conv_handler = ConversationHandler(
+            entry_points=[CommandHandler("start", start)],
+            states={
+                WAITING_FOR_DATA: [
+                    CommandHandler("done", process_data),
+                    CommandHandler("cancel", cancel),
+                    MessageHandler(filters.TEXT & ~filters.COMMAND, collect_data),
+                ],
+            },
+            fallbacks=[CommandHandler("cancel", cancel)],
+        )
+        
+        application.add_handler(conv_handler)
+        
+        logger.info("Запуск бота...")
+        application.run_polling(
+            close_loop=False,
+            stop_signals=[],
+            timeout=30
+        )
+        
+    except Exception as e:
+        logger.error(f"ОШИБКА ПРИ ЗАПУСКЕ: {e}")
+        sys.exit(1)
 
 if __name__ == "__main__":
     main()
