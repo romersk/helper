@@ -156,7 +156,7 @@ async def process_data(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     return ConversationHandler.END
 
-async def main():
+def main():
     try:
         token = os.getenv("BOT_TOKEN")
         if not token:
@@ -186,11 +186,11 @@ async def main():
         application.add_handler(conv_handler)
 
         logger.info("Запуск бота...")
-        await application.run_polling()
+        application.run_polling()  # <-- без await
 
     except Exception as e:
         logger.error(f"ОШИБКА ПРИ ЗАПУСКЕ: {e}")
         sys.exit(1)
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    main()
