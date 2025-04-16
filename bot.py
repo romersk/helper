@@ -1,5 +1,6 @@
 import logging
 import os
+import locale
 from datetime import datetime
 from telegram import Update
 from telegram.ext import (
@@ -22,123 +23,123 @@ logger = logging.getLogger(__name__)
 WAITING_FOR_DATA = 1
 
 def parse_time(ts):
-    """Парсит строку с датой в объект datetime"""
-    month_replacements = {
-        "января": "янв.",
-        "февраля": "февр.",
-        "марта": "мар.",
-        "апреля": "апр.",
-        "мая": "май",
-        "июня": "июн.",
-        "июля": "июл.",
-        "августа": "авг.",
-        "сентября": "сент.",
-        "октября": "окт.",
-        "ноября": "нояб.",
-        "декабря": "дек."
-    }
-    
-    # Нормализация формата месяца
-    for full, short in month_replacements.items():
-        ts = ts.replace(full, short)
-    
-    # Удаление лишних пробелов
-    ts = ' '.join(ts.split())
-    
+    """Универсальный парсер для русскоязычных дат"""
     try:
-        return datetime.strptime(ts, "%d %b., %H:%M")
-    except ValueError as e:
-        logger.error(f"Ошибка парсинга времени: {ts} - {str(e)}")
-        raise ValueError(
-            f"❌ Неверный формат времени: `{ts}`\n"
-            "Правильный формат: `16 апр., 10:39` или `16 апреля, 10:39`"
-        )
+        locale.setlocale(locale.LC_TIME, 'ru_RU.UTF-8')
+    except locale.Error:
+        try:
+            locale.setlocale(locale.LC_TIME, 'Russian_Russia.1251')
+        except locale.Error:
+            pass
+    
+    # Нормализация строки
+    ts = ' '.join(ts.strip().split())
+    ts = ts.replace('..', '.').replace('.,', ',')
+    
+    # Все поддерживаемые форматы
+    formats = [
+        "%d %b., %H:%M",    # "16 апр., 10:39"
+        "%d %B, %H:%M",     # "16 апреля, 10:39"
+        "%d.%m., %H:%M",    # "16.04., 10:39"
+        "%d %b. %H:%M",     # "16 апр. 10:39"
+        "%d %B %H:%M",      # "16 апреля 10:39"
+    ]
+    
+    for fmt in formats:
+        try:
+            return datetime.strptime(ts, fmt)
+        except ValueError:
+            continue
+    
+    raise ValueError(
+        f"❌ Не удалось распознать время: `{ts}`\n"
+        "Поддерживаемые форматы:\n"
+        "• 16 апр., 10:39\n"
+        "• 16 апреля, 10:39\n"
+        "• 16.04., 10:39\n"
+        "• 16 апр. 10:39"
+    )
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Обработчик команды /start"""
+    """Начало диалога"""
     await update.message.reply_text(
-        "🚖 **Анализатор поездок**\n\n"
-        "Присылайте данные поездок в формате:\n\n"
-        "Фамилия Имя Отчество\n"
-        "Дата и время (например: 16 апр., 10:39 или 16 апреля, 10:39)\n\n"
+        "🚕 **Анализатор поездок**\n\n"
+        "Присылайте данные в формате:\n\n"
+        "<b>Фамилия Имя Отчество</b>\n"
+        "<i>Дата и время</i>\n\n"
+        "Примеры времени:\n"
+        "• 16 апр., 10:39\n"
+        "• 16 апреля, 10:39\n"
+        "• 16.04., 10:39\n\n"
         "Можно присылать данные несколькими сообщениями.\n"
-        "Когда закончите, введите /done\n"
-        "Для отмены /cancel"
+        "Завершить ввод - /done\n"
+        "Отмена - /cancel",
+        parse_mode="HTML"
     )
     context.user_data["collected_data"] = []
     return WAITING_FOR_DATA
 
-async def collect_data(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Сбор данных из сообщений"""
-    context.user_data["collected_data"].append(update.message.text)
-    await update.message.reply_text(
-        "✅ Данные сохранены. Можно присылать следующую часть "
-        "или /done для обработки"
-    )
-    return WAITING_FOR_DATA
-
 async def process_data(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Обработка собранных данных"""
+    """Обработка и анализ данных"""
     try:
-        # Объединяем все полученные данные
         full_text = "\n".join(context.user_data["collected_data"])
         lines = [line.strip() for line in full_text.split("\n") if line.strip()]
         
         if len(lines) % 2 != 0:
             await update.message.reply_text(
-                "❌ Нечетное количество строк. Каждому ФИО должна соответствовать дата"
+                "⚠️ <b>Ошибка:</b> Непарное количество строк. "
+                "Каждому ФИО должна соответствовать дата",
+                parse_mode="HTML"
             )
             return ConversationHandler.END
         
-        orders = []
+        # Парсинг данных
+        drivers = {}
         for i in range(0, len(lines), 2):
             name = lines[i]
             time_str = lines[i+1]
+            
             try:
                 time = parse_time(time_str)
-                orders.append((name, time))
+                if name not in drivers:
+                    drivers[name] = {"first": time, "last": time}
+                else:
+                    drivers[name]["first"] = min(drivers[name]["first"], time)
+                    drivers[name]["last"] = max(drivers[name]["last"], time)
             except ValueError as e:
                 await update.message.reply_text(str(e))
                 return ConversationHandler.END
         
-        if not orders:
-            await update.message.reply_text("❌ Нет данных для анализа")
+        # Формирование отчета
+        if not drivers:
+            await update.message.reply_text("ℹ️ Нет данных для анализа")
             return ConversationHandler.END
         
-        # Анализ данных
-        driver_times = {}
-        for name, time in orders:
-            if name not in driver_times:
-                driver_times[name] = {"first": time, "last": time}
-            else:
-                driver_times[name]["first"] = min(driver_times[name]["first"], time)
-                driver_times[name]["last"] = max(driver_times[name]["last"], time)
-        
-        # Формирование отчета
-        response = ["📊 **Результаты анализа**\n"]
-        for name, times in sorted(driver_times.items(), key=lambda x: x[1]["first"]):
-            response.append(
-                f"👤 **{name}**\n"
-                f"⏱ Первая поездка: {times['first'].strftime('%H:%M')}\n"
-                f"⏱ Последняя поездка: {times['last'].strftime('%H:%M')}\n"
+        report = ["<b>📊 Результаты анализа</b>\n"]
+        for name, times in sorted(drivers.items(), key=lambda x: x[1]["first"]):
+            report.append(
+                f"\n👤 <b>{name}</b>\n"
+                f"• Первая поездка: {times['first'].strftime('%H:%M')}\n"
+                f"• Последняя поездка: {times['last'].strftime('%H:%M')}"
             )
         
-        # Разбивка длинных сообщений
-        full_response = "\n".join(response)
-        for i in range(0, len(full_response), 4096):
-            await update.message.reply_text(full_response[i:i+4096])
+        # Отправка частями если сообщение слишком длинное
+        message = "\n".join(report)
+        for i in range(0, len(message), 4096):
+            await update.message.reply_text(
+                message[i:i+4096],
+                parse_mode="HTML"
+            )
             
     except Exception as e:
-        logger.error(f"Ошибка обработки: {str(e)}")
-        await update.message.reply_text("⚠️ Произошла ошибка при обработке данных")
+        logger.exception("Ошибка обработки данных")
+        await update.message.reply_text(
+            "⚠️ <b>Ошибка обработки:</b> Попробуйте отправить данные еще раз",
+            parse_mode="HTML"
+        )
     finally:
         context.user_data.clear()
-    return ConversationHandler.END
-
-async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Обработчик отмены"""
-    await update.message.reply_text("❌ Операция отменена")
-    context.user_data.clear()
+    
     return ConversationHandler.END
 
 def main():
