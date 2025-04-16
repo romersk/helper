@@ -79,6 +79,24 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data["collected_data"] = []
     return WAITING_FOR_DATA
 
+async def collect_data(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Сбор данных от пользователя"""
+    context.user_data["collected_data"].append(update.message.text)
+    await update.message.reply_text(
+        "✅ Данные получены. Можно присылать следующую часть или /done для обработки",
+        parse_mode="HTML"
+    )
+    return WAITING_FOR_DATA
+
+async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Обработчик отмены"""
+    await update.message.reply_text(
+        "❌ Операция отменена. Все собранные данные удалены.",
+        parse_mode="HTML"
+    )
+    context.user_data.clear()
+    return ConversationHandler.END
+
 async def process_data(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обработка и анализ данных"""
     try:
