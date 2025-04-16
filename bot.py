@@ -1,4 +1,5 @@
 import logging
+import os
 from datetime import datetime
 from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
@@ -80,7 +81,7 @@ async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 def main():
     # Create Application
-    application = Application.builder().token("YOUR_BOT_TOKEN").build()
+    application = Application.builder().token(os.environ["BOT_TOKEN"]).build()
     
     # Add handlers
     application.add_handler(CommandHandler("start", start))
