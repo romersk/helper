@@ -1,5 +1,6 @@
 import logging
 import os
+import sys
 from datetime import datetime
 from telegram import Update
 from telegram.ext import (
@@ -10,6 +11,8 @@ from telegram.ext import (
     ContextTypes,
     ConversationHandler,
 )
+from telegram.request import HTTPXRequest  # Добавлен отсутствующий импорт
+import anyio
 
 # Настройка логгирования
 logging.basicConfig(
