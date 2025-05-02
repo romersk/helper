@@ -37,12 +37,15 @@ def parse_time(ts: str) -> datetime:
     """Парсит только формат '16 апр., 16:15'"""
     ts = ts.strip().lower()
     pattern = r'^(\d{1,2}) (\w{3})\., (\d{1,2}:\d{2})$'
+    pattern1 = r'^(\d{1,2}) (\w{3}), (\d{1,2}:\d{2})$'
     match = re.match(pattern, ts)
     if not match:
-        raise ValueError(
-            f"❌ Неверный формат: `{ts}`\n"
-            "Ожидается только формат: 16 апр., 16:15"
-        )
+        match = re.match(pattern1, ts)
+        if not match:
+            raise ValueError(
+                f"❌ Неверный формат: `{ts}`\n"
+                "Ожидается только формат: 16 апр., 16:15"
+            )
     
     day, month_str, time_part = match.groups()
 
@@ -69,6 +72,7 @@ def parse_time(ts: str) -> datetime:
         )
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    logger.info(f"/start от {update.effective_user.id}")
     await update.message.reply_text(
         "🚕 <b>Анализатор поездок</b>\n\n"
         "Присылайте данные в формате:\n\n"
