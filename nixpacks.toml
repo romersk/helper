@@ -2,7 +2,11 @@
 nixPkgs = ["python310Full"]
 
 [phases.install]
-cmds = ["pip install --upgrade pip", "pip install -r requirements.txt"]
+cmds = [
+  "python -m venv venv",
+  "./venv/bin/pip install --upgrade pip",
+  "./venv/bin/pip install -r requirements.txt"
+]
 
 [phases.start]
-cmd = "python bot.py"
+cmd = "./venv/bin/python bot.py"
