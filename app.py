@@ -42,12 +42,18 @@ conv_handler = ConversationHandler(
 )
 application.add_handler(conv_handler)
 
-# Устанавливаем webhook при старте
-@app.before_first_request
-def setup_webhook():
+# Устанавливаем webhook при старте приложения
+@app.route("/")
+def index():
+    return "Bot is running"
+
+def set_webhook():
     logger.info("Установка Webhook...")
     application.run_async(application.bot.set_webhook(f"{WEBHOOK_URL}{WEBHOOK_PATH}"))
 
+# Вызываем set_webhook() при запуске приложения
+with app.app_context():
+    set_webhook()
 
 # Webhook endpoint
 @app.route(WEBHOOK_PATH, methods=["POST"])
