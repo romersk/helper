@@ -1,5 +1,6 @@
 import os
 import logging
+import asyncio
 from flask import Flask, request
 from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ConversationHandler
@@ -42,22 +43,30 @@ conv_handler = ConversationHandler(
 )
 application.add_handler(conv_handler)
 
-# Устанавливаем webhook при старте приложения
+async def set_webhook():
+    logger.info("Установка Webhook...")
+    await application.bot.set_webhook(f"{WEBHOOK_URL}{WEBHOOK_PATH}")
+
+def sync_set_webhook():
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    loop.run_until_complete(set_webhook())
+    loop.close()
+
+# Устанавливаем webhook при старте
 @app.route("/")
 def index():
     return "Bot is running"
 
-def set_webhook():
-    logger.info("Установка Webhook...")
-    application.run_async(application.bot.set_webhook(f"{WEBHOOK_URL}{WEBHOOK_PATH}"))
-
-# Вызываем set_webhook() при запуске приложения
-with app.app_context():
-    set_webhook()
+# Вызываем установку webhook при старте приложения
+sync_set_webhook()
 
 # Webhook endpoint
 @app.route(WEBHOOK_PATH, methods=["POST"])
-def webhook():
+async def webhook():
     update = Update.de_json(request.get_json(force=True), application.bot)
-    application.run_async(application.process_update(update))
+    await application.update_queue.put(update)
     return "OK", 200
+
+if __name__ == "__main__":
+    app.run()
