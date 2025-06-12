@@ -3,8 +3,15 @@ import logging
 import asyncio
 from flask import Flask, request
 from telegram import Update
-from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
-from telegram.request import HTTPXRequest  # Добавлен импорт
+from telegram.ext import (
+    Application,
+    CommandHandler,
+    MessageHandler,
+    filters,
+    ContextTypes,
+    ConversationHandler  # Добавлен импорт ConversationHandler
+)
+from telegram.request import HTTPXRequest
 from bot import post_init, start, cancel, collect_data, process_data, WAITING_FOR_DATA
 
 # Настройка логгера
@@ -16,12 +23,10 @@ logger = logging.getLogger(__name__)
 
 # Переменные окружения
 TOKEN = os.environ.get("BOT_TOKEN")
-WEBHOOK_URL = os.environ.get("WEBHOOK_URL")  # Полный URL вашего приложения на Render
+WEBHOOK_URL = os.environ.get("WEBHOOK_URL")  # Полный URL без слеша на конце
 WEBHOOK_PATH = f"/webhook/{TOKEN}"
 
 app = Flask(__name__)
-
-# Глобальная переменная для хранения Application
 application = None
 
 async def initialize_application():
@@ -51,12 +56,9 @@ async def initialize_application():
     )
     application.add_handler(conv_handler)
     
-    # Инициализируем приложение
     await application.initialize()
-    
-    # Устанавливаем webhook
     await application.bot.set_webhook(f"{WEBHOOK_URL}{WEBHOOK_PATH}")
-    logger.info("Webhook установлен")
+    logger.info(f"Webhook установлен: {WEBHOOK_URL}{WEBHOOK_PATH}")
 
 def setup_application():
     """Синхронная обёртка для инициализации приложения"""
@@ -70,7 +72,34 @@ setup_application()
 
 @app.route("/")
 def index():
-    return "Бот работает!"
+    return "Бот работает! Проверьте /debug для информации"
+
+@app.route("/debug")
+def debug():
+    """Эндпоинт для отладки"""
+    webhook_info = None
+    if application and application.bot:
+        try:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            webhook_info = loop.run_until_complete(application.bot.get_webhook_info())
+            loop.close()
+        except Exception as e:
+            logger.error(f"Ошибка получения webhook info: {e}")
+
+    return {
+        "status": "running",
+        "bot_token_set": bool(TOKEN),
+        "app_initialized": application is not None,
+        "webhook_url": WEBHOOK_URL,
+        "webhook_path": WEBHOOK_PATH,
+        "full_webhook_url": f"{WEBHOOK_URL}{WEBHOOK_PATH}",
+        "webhook_info": {
+            "url": webhook_info.url if webhook_info else None,
+            "pending_updates": webhook_info.pending_update_count if webhook_info else None,
+            "last_error_date": webhook_info.last_error_date if webhook_info else None
+        } if webhook_info else None
+    }
 
 @app.route(WEBHOOK_PATH, methods=["POST"])
 async def webhook():
@@ -85,48 +114,6 @@ async def webhook():
     except Exception as e:
         logger.error(f"Ошибка обработки обновления: {e}")
         return "Error", 500
-
-@app.route("/webhook_info")
-async def webhook_info():
-    """Проверка статуса webhook"""
-    if application is None:
-        return "Application not initialized", 500
-    
-    try:
-        info = await application.bot.get_webhook_info()
-        return {
-            "url": info.url,
-            "has_custom_certificate": info.has_custom_certificate,
-            "pending_update_count": info.pending_update_count
-        }
-    except Exception as e:
-        return {"error": str(e)}, 500
-
-@app.route("/debug")
-def debug():
-    """Эндпоинт для отладки"""
-    webhook_info = None
-    if application:
-        try:
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            webhook_info = loop.run_until_complete(application.bot.get_webhook_info())
-            loop.close()
-        except Exception as e:
-            logger.error(f"Ошибка получения webhook info: {e}")
-
-    return {
-        "status": "running",
-        "webhook_url": WEBHOOK_URL,
-        "webhook_path": WEBHOOK_PATH,
-        "full_webhook_url": f"{WEBHOOK_URL}{WEBHOOK_PATH}",
-        "bot_token_set": bool(TOKEN),
-        "app_initialized": application is not None,
-        "webhook_info": {
-            "url": webhook_info.url if webhook_info else None,
-            "pending_updates": webhook_info.pending_update_count if webhook_info else None
-        } if webhook_info else None
-    }
 
 if __name__ == "__main__":
     app.run()
