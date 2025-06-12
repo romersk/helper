@@ -68,5 +68,13 @@ def webhook():
     asyncio.run(application.process_update(update))
     return "OK", 200
 
+@app.route("/status")
+def status():
+    return {
+        "status": "running",
+        "webhook_url": WEBHOOK_URL,
+        "webhook_path": WEBHOOK_PATH
+    }
+
 if __name__ == "__main__":
     app.run()
