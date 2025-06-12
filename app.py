@@ -3,78 +3,103 @@ import logging
 import asyncio
 from flask import Flask, request
 from telegram import Update
-from telegram.ext import Application, CommandHandler, MessageHandler, filters, ConversationHandler
-from telegram.request import HTTPXRequest
+from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 from bot import post_init, start, cancel, collect_data, process_data, WAITING_FOR_DATA
 
 # Настройка логгера
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    level=logging.INFO
+)
 logger = logging.getLogger(__name__)
 
 # Переменные окружения
 TOKEN = os.environ.get("BOT_TOKEN")
-WEBHOOK_URL = os.environ.get("WEBHOOK_URL")  # https://your-app-name.onrender.com
+WEBHOOK_URL = os.environ.get("WEBHOOK_URL")  # Полный URL вашего приложения на Render
 WEBHOOK_PATH = f"/webhook/{TOKEN}"
 
-# Flask app
 app = Flask(__name__)
 
-# Telegram Application
-request_obj = HTTPXRequest(connect_timeout=30, read_timeout=30)
-application = (
-    Application.builder()
-    .token(TOKEN)
-    .request(request_obj)
-    .post_init(post_init)
-    .build()
-)
+# Глобальная переменная для хранения Application
+application = None
 
-# Обработчики
-conv_handler = ConversationHandler(
-    entry_points=[CommandHandler("start", start)],
-    states={
-        WAITING_FOR_DATA: [
-            CommandHandler("done", process_data),
-            CommandHandler("cancel", cancel),
-            MessageHandler(filters.TEXT & ~filters.COMMAND, collect_data),
-        ],
-    },
-    fallbacks=[CommandHandler("cancel", cancel)],
-)
-application.add_handler(conv_handler)
-
-async def set_webhook():
-    logger.info("Установка Webhook...")
+async def initialize_application():
+    """Инициализация Telegram Application"""
+    global application
+    
+    request_obj = HTTPXRequest(connect_timeout=30, read_timeout=30)
+    application = (
+        Application.builder()
+        .token(TOKEN)
+        .request(request_obj)
+        .post_init(post_init)
+        .build()
+    )
+    
+    # Добавляем обработчики
+    conv_handler = ConversationHandler(
+        entry_points=[CommandHandler("start", start)],
+        states={
+            WAITING_FOR_DATA: [
+                CommandHandler("done", process_data),
+                CommandHandler("cancel", cancel),
+                MessageHandler(filters.TEXT & ~filters.COMMAND, collect_data),
+            ],
+        },
+        fallbacks=[CommandHandler("cancel", cancel)],
+    )
+    application.add_handler(conv_handler)
+    
+    # Инициализируем приложение
+    await application.initialize()
+    
+    # Устанавливаем webhook
     await application.bot.set_webhook(f"{WEBHOOK_URL}{WEBHOOK_PATH}")
+    logger.info("Webhook установлен")
 
-def sync_set_webhook():
+def setup_application():
+    """Синхронная обёртка для инициализации приложения"""
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
-    loop.run_until_complete(set_webhook())
+    loop.run_until_complete(initialize_application())
     loop.close()
 
-# Устанавливаем webhook при старте
+# Инициализация при запуске
+setup_application()
+
 @app.route("/")
 def index():
-    return "Bot is running"
+    return "Бот работает!"
 
-# Вызываем установку webhook при старте приложения
-sync_set_webhook()
-
-# Webhook endpoint (синхронная версия)
 @app.route(WEBHOOK_PATH, methods=["POST"])
-def webhook():
-    update = Update.de_json(request.get_json(force=True), application.bot)
-    asyncio.run(application.process_update(update))
-    return "OK", 200
+async def webhook():
+    """Асинхронный обработчик webhook"""
+    if application is None:
+        return "Application not initialized", 500
+    
+    try:
+        update = Update.de_json(await request.get_json(), application.bot)
+        await application.process_update(update)
+        return "OK", 200
+    except Exception as e:
+        logger.error(f"Ошибка обработки обновления: {e}")
+        return "Error", 500
 
-@app.route("/status")
-def status():
-    return {
-        "status": "running",
-        "webhook_url": WEBHOOK_URL,
-        "webhook_path": WEBHOOK_PATH
-    }
+@app.route("/webhook_info")
+async def webhook_info():
+    """Проверка статуса webhook"""
+    if application is None:
+        return "Application not initialized", 500
+    
+    try:
+        info = await application.bot.get_webhook_info()
+        return {
+            "url": info.url,
+            "has_custom_certificate": info.has_custom_certificate,
+            "pending_update_count": info.pending_update_count
+        }
+    except Exception as e:
+        return {"error": str(e)}, 500
 
 if __name__ == "__main__":
     app.run()

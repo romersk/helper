@@ -1,5 +1,6 @@
 python-telegram-bot==20.3
-python-dotenv
 Flask==2.2.5
 flask[async]
-gunicorn[gevent]
+gunicorn
+python-dotenv
+httpx
