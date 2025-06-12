@@ -4,6 +4,7 @@ import asyncio
 from flask import Flask, request
 from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
+from telegram.request import HTTPXRequest  # Добавлен импорт
 from bot import post_init, start, cancel, collect_data, process_data, WAITING_FOR_DATA
 
 # Настройка логгера
@@ -103,12 +104,28 @@ async def webhook_info():
 
 @app.route("/debug")
 def debug():
+    """Эндпоинт для отладки"""
+    webhook_info = None
+    if application:
+        try:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            webhook_info = loop.run_until_complete(application.bot.get_webhook_info())
+            loop.close()
+        except Exception as e:
+            logger.error(f"Ошибка получения webhook info: {e}")
+
     return {
+        "status": "running",
         "webhook_url": WEBHOOK_URL,
         "webhook_path": WEBHOOK_PATH,
         "full_webhook_url": f"{WEBHOOK_URL}{WEBHOOK_PATH}",
         "bot_token_set": bool(TOKEN),
-        "app_initialized": application is not None
+        "app_initialized": application is not None,
+        "webhook_info": {
+            "url": webhook_info.url if webhook_info else None,
+            "pending_updates": webhook_info.pending_update_count if webhook_info else None
+        } if webhook_info else None
     }
 
 if __name__ == "__main__":
