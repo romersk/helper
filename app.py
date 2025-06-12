@@ -61,11 +61,11 @@ def index():
 # Вызываем установку webhook при старте приложения
 sync_set_webhook()
 
-# Webhook endpoint
+# Webhook endpoint (синхронная версия)
 @app.route(WEBHOOK_PATH, methods=["POST"])
-async def webhook():
+def webhook():
     update = Update.de_json(request.get_json(force=True), application.bot)
-    await application.update_queue.put(update)
+    asyncio.run(application.process_update(update))
     return "OK", 200
 
 if __name__ == "__main__":
