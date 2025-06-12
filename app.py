@@ -27,19 +27,22 @@ WEBHOOK_PATH = f"/webhook/{TOKEN}"
 
 app = Flask(__name__)
 application = None
-loop = None
 
 async def init_bot():
-    """Инициализация бота"""
-    global application, loop
+    """Инициализация бота с увеличенными таймаутами"""
+    global application
     
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
+    request_obj = HTTPXRequest(
+        connect_timeout=60.0,
+        read_timeout=60.0,
+        write_timeout=60.0,
+        pool_timeout=60.0
+    )
     
     application = (
         Application.builder()
         .token(TOKEN)
-        .request(HTTPXRequest(connect_timeout=30, read_timeout=30))
+        .request(request_obj)
         .post_init(post_init)
         .build()
     )
@@ -59,12 +62,19 @@ async def init_bot():
     
     application.add_handler(conv_handler)
     await application.initialize()
-    await application.bot.set_webhook(f"{WEBHOOK_URL}{WEBHOOK_PATH}")
+    await application.bot.set_webhook(
+        url=f"{WEBHOOK_URL}{WEBHOOK_PATH}",
+        max_connections=10,
+        drop_pending_updates=True
+    )
     logger.info(f"Webhook установлен: {WEBHOOK_URL}{WEBHOOK_PATH}")
 
-# Инициализация при старте
+# Создаем отдельный event loop для Flask
+flask_loop = asyncio.new_event_loop()
+
+# Инициализация бота при старте
 try:
-    asyncio.run(init_bot())
+    flask_loop.run_until_complete(init_bot())
 except Exception as e:
     logger.error(f"Ошибка инициализации бота: {e}")
     raise
@@ -80,7 +90,7 @@ def debug():
         return jsonify({"error": "Application not initialized"}), 500
     
     try:
-        webhook_info = loop.run_until_complete(application.bot.get_webhook_info())
+        webhook_info = flask_loop.run_until_complete(application.bot.get_webhook_info())
         return jsonify({
             "status": "running",
             "bot_username": application.bot.username,
@@ -93,6 +103,7 @@ def debug():
             }
         })
     except Exception as e:
+        logger.error(f"Ошибка в debug: {e}")
         return jsonify({"error": str(e)}), 500
 
 @app.route(WEBHOOK_PATH, methods=["POST"])
@@ -103,7 +114,7 @@ def webhook():
     
     try:
         update = Update.de_json(request.get_json(), application.bot)
-        loop.run_until_complete(application.process_update(update))
+        flask_loop.run_until_complete(application.process_update(update))
         return "OK", 200
     except Exception as e:
         logger.error(f"Ошибка обработки обновления: {e}")
