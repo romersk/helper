@@ -101,5 +101,15 @@ async def webhook_info():
     except Exception as e:
         return {"error": str(e)}, 500
 
+@app.route("/debug")
+def debug():
+    return {
+        "webhook_url": WEBHOOK_URL,
+        "webhook_path": WEBHOOK_PATH,
+        "full_webhook_url": f"{WEBHOOK_URL}{WEBHOOK_PATH}",
+        "bot_token_set": bool(TOKEN),
+        "app_initialized": application is not None
+    }
+
 if __name__ == "__main__":
     app.run()
