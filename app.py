@@ -3,13 +3,7 @@ import logging
 import asyncio
 from flask import Flask, request, jsonify
 from telegram import Update
-from telegram.ext import (
-    Application,
-    CommandHandler,
-    MessageHandler,
-    filters,
-    ConversationHandler
-)
+from telegram.ext import Application, CommandHandler, MessageHandler, filters, ConversationHandler
 from telegram.request import HTTPXRequest
 from bot import post_init, start, cancel, collect_data, process_data, WAITING_FOR_DATA
 
@@ -29,25 +23,15 @@ app = Flask(__name__)
 application = None
 
 async def init_bot():
-    """Инициализация бота с увеличенными таймаутами"""
     global application
-    
-    request_obj = HTTPXRequest(
-        connect_timeout=60.0,
-        read_timeout=60.0,
-        write_timeout=60.0,
-        pool_timeout=60.0
-    )
-    
     application = (
         Application.builder()
         .token(TOKEN)
-        .request(request_obj)
         .post_init(post_init)
         .build()
     )
     
-    # Регистрация обработчиков
+    # Регистрация обработчиков из bot.py
     conv_handler = ConversationHandler(
         entry_points=[CommandHandler("start", start)],
         states={
@@ -59,8 +43,8 @@ async def init_bot():
         },
         fallbacks=[CommandHandler("cancel", cancel)],
     )
-    
     application.add_handler(conv_handler)
+    
     await application.initialize()
     await application.bot.set_webhook(
         url=f"{WEBHOOK_URL}{WEBHOOK_PATH}",
@@ -69,56 +53,20 @@ async def init_bot():
     )
     logger.info(f"Webhook установлен: {WEBHOOK_URL}{WEBHOOK_PATH}")
 
-# Создаем отдельный event loop для Flask
-flask_loop = asyncio.new_event_loop()
-
-# Инициализация бота при старте
-try:
-    flask_loop.run_until_complete(init_bot())
-except Exception as e:
-    logger.error(f"Ошибка инициализации бота: {e}")
-    raise
+# Инициализация при старте
+loop = asyncio.new_event_loop()
+asyncio.set_event_loop(loop)
+loop.run_until_complete(init_bot())
 
 @app.route("/")
 def index():
-    return "Бот работает! Проверьте /debug для информации"
-
-@app.route("/debug")
-def debug():
-    """Эндпоинт для отладки"""
-    if not application:
-        return jsonify({"error": "Application not initialized"}), 500
-    
-    try:
-        webhook_info = flask_loop.run_until_complete(application.bot.get_webhook_info())
-        return jsonify({
-            "status": "running",
-            "bot_username": application.bot.username,
-            "webhook_url": f"{WEBHOOK_URL}{WEBHOOK_PATH}",
-            "webhook_info": {
-                "url": webhook_info.url,
-                "pending_updates": webhook_info.pending_update_count,
-                "last_error": str(webhook_info.last_error_message),
-                "max_connections": webhook_info.max_connections
-            }
-        })
-    except Exception as e:
-        logger.error(f"Ошибка в debug: {e}")
-        return jsonify({"error": str(e)}), 500
+    return "Бот работает!"
 
 @app.route(WEBHOOK_PATH, methods=["POST"])
-def webhook():
-    """Синхронный обработчик webhook"""
-    if not application:
-        return "Application not initialized", 500
-    
-    try:
-        update = Update.de_json(request.get_json(), application.bot)
-        flask_loop.run_until_complete(application.process_update(update))
-        return "OK", 200
-    except Exception as e:
-        logger.error(f"Ошибка обработки обновления: {e}")
-        return "Error", 500
+async def webhook():
+    update = Update.de_json(await request.get_json(), application.bot)
+    await application.process_update(update)
+    return "OK", 200
 
 if __name__ == "__main__":
     app.run()
