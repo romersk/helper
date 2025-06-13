@@ -1,9 +1,14 @@
 import os
 import logging
-import asyncio
 from flask import Flask, request
 from telegram import Update
-from telegram.ext import Application, CommandHandler, MessageHandler, filters, ConversationHandler
+from telegram.ext import (
+    Application,
+    CommandHandler,
+    MessageHandler,
+    filters,
+    ConversationHandler
+)
 from bot import post_init, start, cancel, collect_data, process_data, WAITING_FOR_DATA
 
 # Настройка логгера
@@ -19,24 +24,21 @@ WEBHOOK_URL = os.environ["WEBHOOK_URL"].rstrip("/")
 WEBHOOK_PATH = f"/webhook/{TOKEN}"
 
 app = Flask(__name__)
-application = None
-loop = None  # Глобальная переменная для event loop
+bot_application = None
 
-async def init_bot():
-    """Инициализация бота с обработкой ошибок"""
-    global application, loop
+def setup_bot():
+    """Синхронная инициализация бота"""
+    global bot_application
     
     try:
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        
-        application = (
+        bot_application = (
             Application.builder()
             .token(TOKEN)
             .post_init(post_init)
             .build()
         )
         
+        # Регистрация обработчиков
         conv_handler = ConversationHandler(
             entry_points=[CommandHandler("start", start)],
             states={
@@ -48,26 +50,30 @@ async def init_bot():
             },
             fallbacks=[CommandHandler("cancel", cancel)],
         )
-        application.add_handler(conv_handler)
         
-        await application.initialize()
-        await application.bot.set_webhook(
-            url=f"{WEBHOOK_URL}{WEBHOOK_PATH}",
-            max_connections=5,  # Уменьшено для Render
-            drop_pending_updates=True
+        bot_application.add_handler(conv_handler)
+        
+        # Синхронная установка webhook
+        import asyncio
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        
+        loop.run_until_complete(bot_application.initialize())
+        loop.run_until_complete(
+            bot_application.bot.set_webhook(
+                url=f"{WEBHOOK_URL}{WEBHOOK_PATH}",
+                max_connections=5,
+                drop_pending_updates=True
+            )
         )
         logger.info(f"Webhook установлен: {WEBHOOK_URL}{WEBHOOK_PATH}")
         
     except Exception as e:
-        logger.error(f"FATAL: Ошибка инициализации бота: {e}")
+        logger.error(f"Ошибка инициализации бота: {e}")
         raise
 
 # Инициализация при старте
-try:
-    asyncio.run(init_bot())
-except Exception as e:
-    logger.critical(f"Не удалось запустить бота: {e}")
-    exit(1)
+setup_bot()
 
 @app.route("/")
 def index():
@@ -75,31 +81,47 @@ def index():
 
 @app.route("/debug")
 def debug():
-    """Эндпоинт для проверки состояния"""
-    if not application:
+    """Проверка состояния бота"""
+    if not bot_application:
         return "Бот не инициализирован", 500
     
     try:
+        import asyncio
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        
+        webhook_info = loop.run_until_complete(
+            bot_application.bot.get_webhook_info()
+        )
+        
         return {
             "status": "active",
-            "bot": application.bot.username if application.bot else None,
-            "webhook": f"{WEBHOOK_URL}{WEBHOOK_PATH}"
+            "bot": bot_application.bot.username,
+            "webhook_url": webhook_info.url,
+            "pending_updates": webhook_info.pending_update_count
         }
     except Exception as e:
-        return f"Ошибка: {str(e)}", 500
+        return {"error": str(e)}, 500
 
 @app.route(WEBHOOK_PATH, methods=["POST"])
 def webhook():
-    """Синхронный обработчик для совместимости с sync worker"""
-    if not application:
+    """Синхронный обработчик webhook"""
+    if not bot_application:
         return "Bot not initialized", 503
         
     try:
-        update = Update.de_json(request.get_json(), application.bot)
-        loop.run_until_complete(application.process_update(update))
+        update = Update.de_json(request.get_json(), bot_application.bot)
+        
+        # Создаем новый event loop для каждого запроса
+        import asyncio
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        
+        loop.run_until_complete(bot_application.process_update(update))
         return "OK", 200
+        
     except Exception as e:
-        logger.error(f"Webhook error: {e}")
+        logger.error(f"Ошибка обработки обновления: {e}")
         return "Error", 500
 
 if __name__ == "__main__":
